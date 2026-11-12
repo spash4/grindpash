@@ -814,12 +814,17 @@ body.in-session nav.tabs { display: none; }
   /* ---------------- sheet ---------------- */
   var lastFocus = null;
   function openSheet(label, title, html, after) {
-    lastFocus = document.activeElement;
+    if ($('sheet-bg').hidden) lastFocus = document.activeElement;
+    sheetBack = null;
+    document.querySelector('.sheet').scrollTop = 0;
     $('sheet-label').textContent = label || ''; $('sheet-title').textContent = title; $('sheet-body').innerHTML = html;
     $('sheet-bg').hidden = false; document.body.style.overflow = 'hidden'; if (after) after($('sheet-body')); syncBack();
   }
-  function closeSheet() {
+  var sheetBack = null;
+  function closeSheet(force) {
     if ($('sheet-bg').hidden) return; stopScan();
+    if (sheetBack && force !== true) { var fb = sheetBack; sheetBack = null; fb(); return; }
+    sheetBack = null;
     $('sheet-bg').hidden = true; $('sheet-body').innerHTML = ''; document.body.style.overflow = ''; syncBack();
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
@@ -878,14 +883,15 @@ body.in-session nav.tabs { display: none; }
       }); });
     });
   }
-  function libSheet() {
+  function libSheet(restore) {
     var groups = {};
     Object.keys(EXDB.ex).forEach(function (n) { var e = EXDB.ex[n]; if (!e.lib || !e.p) return; (groups[e.p] = groups[e.p] || []).push(n); });
     var thumb = function (n) { var t = TECH.tech[n], f = t && TECH.imgs[t.img]; return f ? '<img alt="" loading="lazy" src="' + f[0] + '">' : '<img alt="">'; };
     var h = Object.keys(EXDB.pat).filter(function (k) { return groups[k]; }).map(function (k) {
       return '<div class="libg"><h3>' + esc(EXDB.pat[k].l) + '</h3>' + groups[k].sort().map(function (n) { return '<button type="button" class="alt" data-n="' + esc(n) + '">' + thumb(n) + '<div><b>' + esc(n) + '</b><span>' + esc(EXDB.ex[n].eq) + '</span></div></button>'; }).join('') + '</div>';
     }).join('');
-    openSheet('Справочник', 'Техника упражнений', h, function (b) { b.querySelectorAll('.alt').forEach(function (btn) { btn.addEventListener('click', function () { techSheet(btn.dataset.n); }); }); });
+    openSheet('Справочник', 'Техника упражнений', h, function (b) { b.querySelectorAll('.alt').forEach(function (btn) { btn.addEventListener('click', function () { var st = document.querySelector('.sheet').scrollTop; techSheet(btn.dataset.n); sheetBack = function () { libSheet(st); }; }); }); });
+    if (restore) document.querySelector('.sheet').scrollTop = restore;
   }
 
   /* ---------------- TRAIN ---------------- */
