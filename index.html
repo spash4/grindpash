@@ -729,11 +729,11 @@ body.in-session nav.tabs { display: none; }
     });
   }
   function coachPlan(day) {
-    if (S.prof.np) return 'Первым делом выбери программу тренировок — жми кнопку ниже.';
-    var title = '<b>' + esc(day.short + ' · ' + day.title) + '</b>', up = [], seen = 0;
-    if (PROG[S.prof.wk - 1].deload) return 'Сегодня ' + title + '. Разгрузка: 40% от рабочего веса, по 15 повторов. Отдыхаем, чтобы потом расти.';
+    if (S.prof.np) return 'Выбирай программу тренировок и погнали.';
+    var title = '<b>' + esc(day.title) + '</b>', up = [], seen = 0;
+    if (PROG[S.prof.wk - 1].deload) return 'Следующая тренировка — ' + title + '. Разгрузка: 40% от рабочего веса, по 15 повторов. Отдыхаем, чтобы потом расти.';
     day.ex.forEach(function (x) { var p = parsePlan(x.sets), n = swapName(x.name); if (p.free || isCardio(n) || !lastOf(n)) return; seen++; var o = suggest(n, p)[0]; if (o && /^Повышай|отягощение/.test(o.t)) up.push(n); });
-    var h = 'Сегодня ' + title + '. ';
+    var h = 'Следующая тренировка — ' + title + '. ';
     if (up.length) h += 'Повышаем вес: <b>' + up.slice(0, 3).map(esc).join(', ') + (up.length > 3 ? ' и ещё ' + (up.length - 3) : '') + '</b>. В остальном добавляем повтор.';
     else if (seen) h += 'Задача простая: побить прошлый раз хотя бы на один повтор в каждом упражнении.';
     else h += 'Подбирай вес на нижнюю границу повторов, 1–2 в запасе. Дальше веса веду я.';
@@ -785,7 +785,7 @@ body.in-session nav.tabs { display: none; }
     var h = L.dl ? 'Разгрузка засчитана. Восстанавливайся, дальше снова растём.' : L.pr ? pick(['Мощно отработал.', 'Вот это тренировка.']) + ' ' + L.pr + ' ' + plural(L.pr, 'рекорд', 'рекорда', 'рекордов') + ' 🏆' : pick(['Тренировка в копилке.', 'Отработал, засчитано.', 'Ещё одна на ферме.']);
     if (up.length) h += '<p>В следующий раз <b>+вес</b>: ' + up.map(esc).join(', ') + '.</p>';
     if (down.length) h += '<p>Не дотянул до плана: ' + down.map(esc).join(', ') + '. Держи вес и добирай повторы.</p>';
-    h += '<p>Следующая: <b>' + esc(nd.short + ' · ' + nd.title) + '</b>.</p>';
+    h += '<p>Следующая тренировка — <b>' + esc(nd.title) + '</b>.</p>';
     return coachHTML(h, 0);
   }
 
