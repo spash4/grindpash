@@ -110,33 +110,13 @@
   function progKey() { return (S.prof && PROGS[S.prof.prog]) ? S.prof.prog : 'ul'; }
   function setProg(k) { PROG = (PROGS[k] || PROGS.ul).w; WK = PROG.length; }
   function isCardio(n) { return /^Кардио/.test(n); }
-  /* дни недели программы сдвигаются под день старта: S.prof.sd = 0 (Пн) … 6 (Вс) */
-  var WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'], WDF = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
-  function relabel(x) {
-    var i = WD.indexOf(x.short), sd = +(S.prof && S.prof.sd) || 0;
-    if (i < 0 || !sd) return x;
-    var j = (i + sd) % 7, o = {}; for (var k in x) o[k] = x[k];
-    o.short = WD[j]; o.day = WDF[j]; return o;
-  }
-  function dayOf(wk, d) { return relabel(PROG[wk - 1].days[d]); }
-  function schedTxt(sd) { var keep = S.prof.sd; if (sd != null) S.prof.sd = sd; var t = PROG[0].days.map(function (x) { return relabel(x).short; }).join(' · '); S.prof.sd = keep; return t; }
-  function startDaySheet(after) {
-    var cur = S.prof.sd != null ? +S.prof.sd : (new Date().getDay() + 6) % 7;
-    var h = '<p class="muted small">Программа расписана по дням недели. Выбери, с какого дня начинаешь — расписание сдвинется под тебя, и пропусков не будет.</p>' +
-      '<div class="chips" id="sd-chips" role="group" aria-label="День старта">' + WD.map(function (w, i) { return '<button type="button" class="chip" data-i="' + i + '" aria-pressed="' + (i === cur) + '">' + w + '</button>'; }).join('') + '</div>' +
-      '<p class="small" style="margin-top:12px">Твои дни: <b id="sd-prev">' + esc(schedTxt(cur)) + '</b></p>' +
-      '<button class="btn" type="button" id="sd-ok" style="margin-top:8px">Готово</button>';
-    openSheet('Программа', 'С какого дня начинаешь?', h, function (b) {
-      b.querySelectorAll('#sd-chips .chip').forEach(function (c) { c.addEventListener('click', function () {
-        cur = +c.dataset.i; haptic('light');
-        b.querySelectorAll('#sd-chips .chip').forEach(function (x) { x.setAttribute('aria-pressed', String(x === c)); });
-        b.querySelector('#sd-prev').textContent = schedTxt(cur);
-      }); });
-      b.querySelector('#sd-ok').addEventListener('click', function () {
-        S.prof.sd = cur; Store.set('pr', S.prof); haptic('ok'); closeSheet(true);
-        if (after) after(); else renderTrain();
-      });
-    });
+  function dayOf(wk, d) { return PROG[wk - 1].days[d]; }
+  /* следующая тренировка после (wk, d) по порядку программы */
+  function advanceFrom(wk, d) {
+    var nd = d + 1, nw = wk;
+    if (nd >= PROG[nw - 1].days.length) { nd = 0; nw++; }
+    if (nw > WK) { nw = 1; S.prof.cycle = (S.prof.cycle || 1) + 1; }
+    S.prof.wk = nw; S.prof.day = nd; Store.set('pr', S.prof);
   }
   function parsePlan(s) {
     var m = String(s).match(/^(\d+)(?:\s*–\s*(\d+))?\s*×\s*(\d+)(?:\s*–\s*(\d+))?/);
@@ -490,7 +470,7 @@
         var k = btn.dataset.p;
         if (k === pk) { closeSheet(); show('train'); return; }
         S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
-        haptic('ok'); startDaySheet(function () { show('train'); toast('Программа: ' + PROGS[k].t + ' · ' + schedTxt()); });
+        haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
       }); });
     });
   }
@@ -516,7 +496,7 @@
       b.querySelector('#pg-no').addEventListener('click', closeSheet);
       b.querySelector('#pg-yes').addEventListener('click', function () {
         S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
-        haptic('ok'); startDaySheet(function () { show('train'); toast('Программа: ' + PROGS[k].t + ' · ' + schedTxt()); });
+        haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
       });
     });
   }
@@ -527,22 +507,28 @@
     if (draft) {
       h += '<h2>' + esc(draft.title) + '</h2><p>Отмечено подходов: ' + draft.ex.reduce(function (a, x) { return a + x.s.filter(function (s) { return s.d; }).length; }, 0) + '</p><button class="btn" type="button" id="go-sess">Продолжить</button>';
     } else {
-      h += '<h2>' + esc(day.short) + ' · ' + esc(day.title) + '</h2><div class="exlist">' + day.ex.map(function (x) { var nm = swapName(x.name); return '<div class="li"><span>' + esc(nm) + (nm !== x.name ? ' <span style="color:#777">⇄</span>' : '') + '</span><b>' + esc(x.sets) + '</b></div>'; }).join('') + '</div><button class="btn" type="button" id="go-sess">Начать тренировку</button>';
+      h += '<h2>' + esc(day.short) + ' · ' + esc(day.title) + '</h2><div class="exlist">' + day.ex.map(function (x) { var nm = swapName(x.name); return '<div class="li"><span>' + esc(nm) + (nm !== x.name ? ' <span style="color:#777">⇄</span>' : '') + '</span><b>' + esc(x.sets) + '</b></div>'; }).join('') + '</div><button class="btn" type="button" id="go-sess">Начать тренировку</button><button type="button" class="fatlink" id="go-skip" style="margin-top:12px">Пропустить эту тренировку</button>';
     }
     if (S.prof.np && !draft) h = '<span class="label">Старт</span><h2>Выбери программу тренировок</h2><p>С какой программы начнём? Её можно поменять в любой момент.</p><button class="btn" type="button" id="go-pick">Выбрать программу</button>';
     $('next').innerHTML = h; if ($('go-pick')) $('go-pick').addEventListener('click', progPicker);
+    if ($('go-skip')) $('go-skip').addEventListener('click', function () {
+      var cur = dayOf(wk, d);
+      openSheet('Тренировки', 'Пропустить ' + cur.short + ' · ' + cur.title + '?', '<p class="muted">Следующей станет тренировка после неё. Пропуск не записывается в историю — тренер это заметит, если пропусков станет много.</p><button class="btn" type="button" id="sk-yes">Пропустить</button><button class="btn ghost" type="button" id="sk-no" style="margin-top:8px">Отмена</button>', function (b) {
+        b.querySelector('#sk-no').addEventListener('click', function () { closeSheet(true); });
+        b.querySelector('#sk-yes').addEventListener('click', function () { advanceFrom(wk, d); pickWeek = null; haptic('light'); closeSheet(true); renderTrain(); var n = dayOf(S.prof.wk, S.prof.day); toast('Следующая: ' + n.short + ' · ' + n.title); });
+      });
+    });
     renderCoachHome();
     $('go-sess').addEventListener('click', function () { if (!S.draft) startSession(wk, d); else show('sess'); });
     var pk = progKey();
     $('progs').innerHTML = Object.keys(PROGS).map(function (k) { return '<button type="button" class="chip" data-p="' + k + '" aria-pressed="' + (k === pk) + '">' + PROGS[k].t + '</button>'; }).join('');
-    $('prog-desc').innerHTML = esc(PDESC[pk]) + (S.prof.np ? '' : '<br><button type="button" class="fatlink" id="sd-edit" style="margin-top:6px">Дни тренировок: ' + esc(schedTxt()) + ' · изменить</button>');
-    if ($('sd-edit')) $('sd-edit').addEventListener('click', function () { if (S.draft) { toast('Сначала заверши текущую тренировку'); return; } startDaySheet(); });
+    $('prog-desc').textContent = PDESC[pk];
     $('progs').querySelectorAll('.chip').forEach(function (b) { b.addEventListener('click', function () { switchProg(b.dataset.p); }); });
     var pw = pickWeek || wk;
     $('weeks').innerHTML = PROG.map(function (w) { return '<button type="button" class="chip" data-w="' + w.n + '" aria-pressed="' + (w.n === pw) + '">' + (w.label || 'Неделя ' + w.n) + '</button>'; }).join('');
     $('weeks').querySelectorAll('.chip').forEach(function (b) { b.addEventListener('click', function () { pickWeek = +b.dataset.w; renderTrain(); }); });
     var done = doneSet();
-    $('daylist').innerHTML = PROG[pw - 1].days.map(relabel).map(function (x, i) {
+    $('daylist').innerHTML = PROG[pw - 1].days.map(function (x, i) {
       var isD = done[pw + ':' + i];
       return '<button type="button" class="dayrow' + (isD ? ' done' : '') + '" data-d="' + i + '"><div><b>' + esc(x.short) + ' · ' + esc(x.title) + '</b><br><span>' + x.ex.length + ' упражнений' + (isD ? ' · сделано ✓' : '') + '</span></div><span>Начать ›</span></button>';
     }).join('');
@@ -645,12 +631,8 @@
     var val = JSON.stringify(L); if (val.length > 4000) { L.ex.forEach(function (x) { x.s = x.s.slice(0, 6); }); val = JSON.stringify(L); }
     Store.set('w_' + ts, val);
     S.logs.unshift(L);
-    if (D.wk === S.prof.wk && D.day === S.prof.day && (D.prog || 'ul') === progKey()) {
-      var nd = S.prof.day + 1, nw = S.prof.wk;
-      if (nd >= PROG[nw - 1].days.length) { nd = 0; nw++; }
-      if (nw > WK) { nw = 1; S.prof.cycle = (S.prof.cycle || 1) + 1; }
-      S.prof.wk = nw; S.prof.day = nd; Store.set('pr', S.prof);
-    }
+    /* сделал текущую или более позднюю тренировку этой недели — следующей становится та, что после неё */
+    if (D.wk === S.prof.wk && D.day >= S.prof.day && (D.prog || 'ul') === progKey()) advanceFrom(D.wk, D.day);
     var plans = {}; D.ex.forEach(function (x) { plans[x.n] = x.plan; });
     S.draft = null; Store.del('wd'); stopTimer();
     var vol = ex.reduce(function (a, x) { return a + x.s.reduce(function (b, s) { return b + s[0] * s[1]; }, 0); }, 0);
