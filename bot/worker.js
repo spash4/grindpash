@@ -4,6 +4,7 @@
  * на остальные сообщения — короткими фразами тренера.
  * /bc — общая база штрихкодов (нужна KV-привязка с именем BC).
  * Токен бота НЕ хранится в коде: он задаётся в Cloudflare как секрет BOT_TOKEN.
+ * Деплой: Cloudflare Workers Builds собирает папку bot из GitHub (spash4/grindpash, ветка main) при каждом push.
  * После деплоя один раз открыть https://<адрес-воркера>/setup — бот подключится.
  */
 const APP_URL = 'https://spash4.github.io/grindpash/';
