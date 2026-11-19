@@ -1,0 +1,15 @@
+# Сборка бота в Cloudflare Workers Builds (корень сборки — папка bot).
+# Секрет BOT_TOKEN задаётся в панели Cloudflare и при деплое не трогается.
+name = "grindpash-bot"
+main = "worker.js"
+compatibility_date = "2026-11-17"
+workers_dev = true
+keep_vars = true
+
+[observability]
+enabled = true
+
+# Общая база штрихкодов
+[[kv_namespaces]]
+binding = "BC"
+id = "3bbaa308450d4d78a5daa63110f6549e"
