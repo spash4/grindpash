@@ -2,6 +2,7 @@
  * GrindPash bot — Cloudflare Worker.
  * Отвечает на /start приветствием с кнопкой «Зайти на ферму»,
  * на остальные сообщения — короткими фразами тренера.
+ * /bc — общая база штрихкодов (нужна KV-привязка с именем BC).
  * Токен бота НЕ хранится в коде: он задаётся в Cloudflare как секрет BOT_TOKEN.
  * После деплоя один раз открыть https://<адрес-воркера>/setup — бот подключится.
  */
@@ -384,12 +385,80 @@ async function tg(env, method, body) {
   return r.json();
 }
 
+
+/* ---------- общая база штрихкодов (Cloudflare KV, привязка BC) ---------- */
+const ORIGIN = 'https://spash4.github.io';
+const CORS = { 'access-control-allow-origin': ORIGIN, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type', 'vary': 'origin' };
+const json = (o, status = 200, extra = {}) => new Response(JSON.stringify(o), { status, headers: Object.assign({ 'content-type': 'application/json; charset=utf-8' }, CORS, extra) });
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/* Проверка подписи Telegram initData: доказывает, что запрос пришёл из нашего Mini App от реального пользователя. */
+async function checkInit(init, token) {
+  if (typeof init !== 'string' || init.length > 4096) return null;
+  const p = new URLSearchParams(init);
+  const hash = p.get('hash');
+  if (!hash) return null;
+  p.delete('hash');
+  const dcs = [...p.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([k, v]) => k + '=' + v).join('\n');
+  const enc = new TextEncoder();
+  const k1 = await crypto.subtle.importKey('raw', enc.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const secret = await crypto.subtle.sign('HMAC', k1, enc.encode(token));
+  const k2 = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  if (hex(await crypto.subtle.sign('HMAC', k2, enc.encode(dcs))) !== hash) return null;
+  const age = Date.now() / 1000 - Number(p.get('auth_date'));
+  if (!(age >= -300 && age < 86400)) return null;
+  try { const u = JSON.parse(p.get('user') || 'null'); return u && u.id ? u : null; } catch (e) { return null; }
+}
+
+function cleanFood(b) {
+  const code = String(b.code || '');
+  if (!/^\d{8,14}$/.test(code)) return null;
+  const n = String(b.n || '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!n) return null;
+  const v = ['k', 'p', 'f', 'c'].map((x) => Math.round(Number(b[x]) * 10) / 10);
+  if (v.some((x) => !Number.isFinite(x) || x < 0)) return null;
+  const [k, p, f, c] = v;
+  if (k > 950 || p > 100 || f > 100 || c > 100 || p + f + c > 105) return null;
+  return { code, n, k, p, f, c };
+}
+
+async function barcodeApi(request, env, url) {
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (!env.BC) return json({ error: 'storage' }, 503);
+  if (request.method === 'GET') {
+    const code = url.pathname.slice(4);
+    if (!/^\d{8,14}$/.test(code)) return json({ error: 'code' }, 400);
+    const v = await env.BC.get('bc:' + code, 'json');
+    if (!v) return json({ found: false }, 404, { 'cache-control': 'public, max-age=60' });
+    return json({ found: true, n: v.n, k: v.k, p: v.p, f: v.f, c: v.c }, 200, { 'cache-control': 'public, max-age=300' });
+  }
+  if (request.method === 'POST' && url.pathname === '/bc') {
+    const raw = await request.text();
+    if (raw.length > 6000) return json({ error: 'size' }, 413);
+    let b; try { b = JSON.parse(raw); } catch (e) { return json({ error: 'json' }, 400); }
+    const user = await checkInit(b.init, env.BOT_TOKEN);
+    if (!user) return json({ error: 'auth' }, 401);
+    const food = cleanFood(b);
+    if (!food) return json({ error: 'data' }, 400);
+    const day = new Date().toISOString().slice(0, 10), rk = 'rl:' + user.id + ':' + day;
+    const used = Number(await env.BC.get(rk)) || 0;
+    if (used >= 30) return json({ error: 'limit' }, 429);
+    const key = 'bc:' + food.code, old = await env.BC.get(key, 'json');
+    if (old && old.uid !== user.id) return json({ ok: true, kept: true });
+    await env.BC.put(key, JSON.stringify({ n: food.n, k: food.k, p: food.p, f: food.f, c: food.c, uid: user.id, ts: Date.now() }));
+    await env.BC.put(rk, String(used + 1), { expirationTtl: 172800 });
+    return json({ ok: true });
+  }
+  return json({ error: 'method' }, 405);
+}
+
 const TEXT = { 'content-type': 'text/plain; charset=utf-8' };
 
 export default {
   async fetch(request, env) {
     if (!env.BOT_TOKEN) return new Response('BOT_TOKEN не задан в настройках воркера', { status: 500, headers: TEXT });
     const url = new URL(request.url);
+    if (url.pathname === '/bc' || url.pathname.startsWith('/bc/')) return barcodeApi(request, env, url);
     const secret = await secretOf(env.BOT_TOKEN);
 
     if (request.method === 'GET' && url.pathname === '/setup') {

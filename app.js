@@ -110,7 +110,34 @@
   function progKey() { return (S.prof && PROGS[S.prof.prog]) ? S.prof.prog : 'ul'; }
   function setProg(k) { PROG = (PROGS[k] || PROGS.ul).w; WK = PROG.length; }
   function isCardio(n) { return /^Кардио/.test(n); }
-  function dayOf(wk, d) { return PROG[wk - 1].days[d]; }
+  /* дни недели программы сдвигаются под день старта: S.prof.sd = 0 (Пн) … 6 (Вс) */
+  var WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'], WDF = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  function relabel(x) {
+    var i = WD.indexOf(x.short), sd = +(S.prof && S.prof.sd) || 0;
+    if (i < 0 || !sd) return x;
+    var j = (i + sd) % 7, o = {}; for (var k in x) o[k] = x[k];
+    o.short = WD[j]; o.day = WDF[j]; return o;
+  }
+  function dayOf(wk, d) { return relabel(PROG[wk - 1].days[d]); }
+  function schedTxt(sd) { var keep = S.prof.sd; if (sd != null) S.prof.sd = sd; var t = PROG[0].days.map(function (x) { return relabel(x).short; }).join(' · '); S.prof.sd = keep; return t; }
+  function startDaySheet(after) {
+    var cur = S.prof.sd != null ? +S.prof.sd : (new Date().getDay() + 6) % 7;
+    var h = '<p class="muted small">Программа расписана по дням недели. Выбери, с какого дня начинаешь — расписание сдвинется под тебя, и пропусков не будет.</p>' +
+      '<div class="chips" id="sd-chips" role="group" aria-label="День старта">' + WD.map(function (w, i) { return '<button type="button" class="chip" data-i="' + i + '" aria-pressed="' + (i === cur) + '">' + w + '</button>'; }).join('') + '</div>' +
+      '<p class="small" style="margin-top:12px">Твои дни: <b id="sd-prev">' + esc(schedTxt(cur)) + '</b></p>' +
+      '<button class="btn" type="button" id="sd-ok" style="margin-top:8px">Готово</button>';
+    openSheet('Программа', 'С какого дня начинаешь?', h, function (b) {
+      b.querySelectorAll('#sd-chips .chip').forEach(function (c) { c.addEventListener('click', function () {
+        cur = +c.dataset.i; haptic('light');
+        b.querySelectorAll('#sd-chips .chip').forEach(function (x) { x.setAttribute('aria-pressed', String(x === c)); });
+        b.querySelector('#sd-prev').textContent = schedTxt(cur);
+      }); });
+      b.querySelector('#sd-ok').addEventListener('click', function () {
+        S.prof.sd = cur; Store.set('pr', S.prof); haptic('ok'); closeSheet(true);
+        if (after) after(); else renderTrain();
+      });
+    });
+  }
   function parsePlan(s) {
     var m = String(s).match(/^(\d+)(?:\s*–\s*(\d+))?\s*×\s*(\d+)(?:\s*–\s*(\d+))?/);
     if (!m) { var n = String(s).match(/(\d+)\s*подход/); return { sets: n ? +n[1] : 3, lo: null, hi: null, free: true }; }
@@ -463,7 +490,7 @@
         var k = btn.dataset.p;
         if (k === pk) { closeSheet(); show('train'); return; }
         S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
-        haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
+        haptic('ok'); startDaySheet(function () { show('train'); toast('Программа: ' + PROGS[k].t + ' · ' + schedTxt()); });
       }); });
     });
   }
@@ -489,7 +516,7 @@
       b.querySelector('#pg-no').addEventListener('click', closeSheet);
       b.querySelector('#pg-yes').addEventListener('click', function () {
         S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
-        haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
+        haptic('ok'); startDaySheet(function () { show('train'); toast('Программа: ' + PROGS[k].t + ' · ' + schedTxt()); });
       });
     });
   }
@@ -508,13 +535,14 @@
     $('go-sess').addEventListener('click', function () { if (!S.draft) startSession(wk, d); else show('sess'); });
     var pk = progKey();
     $('progs').innerHTML = Object.keys(PROGS).map(function (k) { return '<button type="button" class="chip" data-p="' + k + '" aria-pressed="' + (k === pk) + '">' + PROGS[k].t + '</button>'; }).join('');
-    $('prog-desc').textContent = PDESC[pk];
+    $('prog-desc').innerHTML = esc(PDESC[pk]) + (S.prof.np ? '' : '<br><button type="button" class="fatlink" id="sd-edit" style="margin-top:6px">Дни тренировок: ' + esc(schedTxt()) + ' · изменить</button>');
+    if ($('sd-edit')) $('sd-edit').addEventListener('click', function () { if (S.draft) { toast('Сначала заверши текущую тренировку'); return; } startDaySheet(); });
     $('progs').querySelectorAll('.chip').forEach(function (b) { b.addEventListener('click', function () { switchProg(b.dataset.p); }); });
     var pw = pickWeek || wk;
     $('weeks').innerHTML = PROG.map(function (w) { return '<button type="button" class="chip" data-w="' + w.n + '" aria-pressed="' + (w.n === pw) + '">' + (w.label || 'Неделя ' + w.n) + '</button>'; }).join('');
     $('weeks').querySelectorAll('.chip').forEach(function (b) { b.addEventListener('click', function () { pickWeek = +b.dataset.w; renderTrain(); }); });
     var done = doneSet();
-    $('daylist').innerHTML = PROG[pw - 1].days.map(function (x, i) {
+    $('daylist').innerHTML = PROG[pw - 1].days.map(relabel).map(function (x, i) {
       var isD = done[pw + ':' + i];
       return '<button type="button" class="dayrow' + (isD ? ' done' : '') + '" data-d="' + i + '"><div><b>' + esc(x.short) + ' · ' + esc(x.title) + '</b><br><span>' + x.ex.length + ' упражнений' + (isD ? ' · сделано ✓' : '') + '</span></div><span>Начать ›</span></button>';
     }).join('');
@@ -747,7 +775,7 @@
   function ownSheet(pre) {
     pre = pre || {};
     openSheet('Свой продукт', pre.bc ? 'Новый продукт по штрихкоду' : 'Свой продукт',
-      (pre.bc ? '<p class="muted small">Штрихкод ' + esc(pre.bc) + ' не найден в базе. Перепиши КБЖУ с упаковки — в следующий раз продукт найдётся сам.</p>' : '<p class="muted small">Значения бери с упаковки, на 100 г.</p>') +
+      (pre.bc ? '<p class="muted small">Штрихкод ' + esc(pre.bc) + ' пока нет в базах. Перепиши КБЖУ с упаковки один раз — и этот продукт будет находиться по штрихкоду у всех на ферме.</p>' : '<p class="muted small">Значения бери с упаковки, на 100 г.</p>') +
       '<div class="field"><label for="on">Название</label><div class="tinput"><input id="on" value="' + esc(pre.n || '') + '" placeholder="Например, Творог Простоквашино 5%"></div></div>' +
       '<div class="grid4">' + [['ok', 'Ккал', pre.k], ['op', 'Белки', pre.p], ['of', 'Жиры', pre.f], ['oc', 'Углев.', pre.c]].map(function (m) { return '<div class="field"><label for="' + m[0] + '">' + m[1] + '</label><div class="tinput num"><input id="' + m[0] + '" inputmode="decimal" value="' + (m[2] != null ? m[2] : '') + '"></div></div>'; }).join('') + '</div>' +
       '<div class="err" id="oe" hidden></div><button class="btn" type="button" id="osave">Сохранить и выбрать вес</button>',
@@ -759,6 +787,7 @@
           e.textContent = msg; e.hidden = !msg; if (msg) return;
           S.custom = [[n, r1(k), r1(p), r1(f), r1(c), pre.bc || '']].concat(S.custom.filter(function (x) { return x[0] !== n; })).slice(0, 40);
           Store.set('cp', S.custom);
+          if (pre.bc) sharedPut(pre.bc, { n: n, k: r1(k), p: r1(p), f: r1(f), c: r1(c) });
           amountSheet({ n: n, k: r1(k), p: r1(p), f: r1(f), c: r1(c), u: null });
         });
         setTimeout(function () { b.querySelector(pre.n ? '#ok' : '#on').focus(); }, 50);
@@ -781,7 +810,7 @@
     var vid = b.querySelector('#vid'), msg = b.querySelector('#scan-msg');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { b.querySelector('#vb').hidden = true; msg.textContent = 'Камера здесь недоступна. Введи цифры под штрихкодом вручную.'; return; }
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (st) {
-      stream = st; vid.srcObject = st; vid.play(); scanning = true;
+      stream = st; vid.srcObject = st; var pl = vid.play(); if (pl && pl.catch) pl.catch(function () {}); scanning = true;
       if ('BarcodeDetector' in window) {
         var det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
         (function loop() { if (!scanning) return; det.detect(vid).then(function (r) { if (r && r[0]) { stopScan(); lookup(r[0].rawValue); } else setTimeout(loop, 250); }).catch(function () { setTimeout(loop, 400); }); })();
@@ -801,19 +830,41 @@
     haptic('medium');
     var mine = S.custom.filter(function (x) { return x[5] === code; })[0];
     if (mine) return amountSheet({ n: mine[0], k: mine[1], p: mine[2], f: mine[3], c: mine[4], u: null });
-    openSheet('Штрихкод ' + code, 'Ищу продукт…', '<p class="muted">Проверяю базу Open Food Facts.</p>');
-    var ctl = window.AbortController ? new AbortController() : null; var tm = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
-    fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,product_name_ru,brands,nutriments', ctl ? { signal: ctl.signal } : {})
-      .then(function (r) { return r.json(); }).then(function (j) {
-        clearTimeout(tm);
-        var p = j && j.status === 1 && j.product, n = p && p.nutriments;
-        if (!p || !n || n['energy-kcal_100g'] == null && n.proteins_100g == null) return ownSheet({ bc: code });
-        var name = (p.product_name_ru || p.product_name || 'Продукт') + (p.brands ? ', ' + String(p.brands).split(',')[0] : '');
-        var f = { n: name, k: r1(+n['energy-kcal_100g'] || 0), p: r1(+n.proteins_100g || 0), f: r1(+n.fat_100g || 0), c: r1(+n.carbohydrates_100g || 0) };
-        if (!f.k) f.k = Math.round(f.p * 4 + f.f * 9 + f.c * 4);
-        S.custom = [[f.n, f.k, f.p, f.f, f.c, code]].concat(S.custom.filter(function (x) { return x[5] !== code; })).slice(0, 40); Store.set('cp', S.custom);
-        amountSheet(f);
-      }).catch(function () { clearTimeout(tm); ownSheet({ bc: code }); });
+    openSheet('Штрихкод ' + code, 'Ищу продукт…', '<p class="muted">Проверяю базы продуктов.</p>');
+    Promise.all([offGet(code), sharedGet(code)]).then(function (r) {
+      var f = r[0] || r[1];
+      if (!f) return ownSheet({ bc: code });
+      S.custom = [[f.n, f.k, f.p, f.f, f.c, code]].concat(S.custom.filter(function (x) { return x[5] !== code; })).slice(0, 40); Store.set('cp', S.custom);
+      amountSheet(f);
+    });
+  }
+  /* сетевой запрос с таймаутом; любая ошибка → null */
+  function getJSON(url, ms) {
+    var ctl = window.AbortController ? new AbortController() : null, tm = setTimeout(function () { if (ctl) ctl.abort(); }, ms || 8000);
+    return fetch(url, ctl ? { signal: ctl.signal } : {}).then(function (r) { clearTimeout(tm); return r.ok ? r.json() : null; }).catch(function () { clearTimeout(tm); return null; });
+  }
+  function offGet(code) {
+    return getJSON('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,product_name_ru,product_name_uk,brands,nutriments').then(function (j) {
+      var p = j && j.status === 1 && j.product, n = p && p.nutriments;
+      if (!p || !n || n['energy-kcal_100g'] == null && n.proteins_100g == null) return null;
+      var name = String(p.product_name_ru || p.product_name_uk || p.product_name || 'Продукт').replace(/[<>]/g, '') + (p.brands ? ', ' + String(p.brands).split(',')[0].replace(/[<>]/g, '') : '');
+      var f = { n: name.slice(0, 80), k: r1(+n['energy-kcal_100g'] || 0), p: r1(+n.proteins_100g || 0), f: r1(+n.fat_100g || 0), c: r1(+n.carbohydrates_100g || 0), u: null };
+      if (!f.k) f.k = Math.round(f.p * 4 + f.f * 9 + f.c * 4);
+      return f;
+    });
+  }
+  /* общая база фермы: продукты, которые уже внесли другие пользователи */
+  var API = 'https://grindpash-bot.serpash4444.workers.dev';
+  function sharedGet(code) {
+    return getJSON(API + '/bc/' + encodeURIComponent(code), 6000).then(function (j) {
+      if (!j || !j.found) return null;
+      var f = { n: String(j.n || 'Продукт').replace(/[<>]/g, '').slice(0, 80), k: r1(+j.k || 0), p: r1(+j.p || 0), f: r1(+j.f || 0), c: r1(+j.c || 0), u: null };
+      return f.n && f.k >= 0 ? f : null;
+    });
+  }
+  function sharedPut(code, f) {
+    if (!inTg || !/^\d{8,14}$/.test(code)) return;
+    try { fetch(API + '/bc', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ code: code, n: f.n, k: f.k, p: f.p, f: f.f, c: f.c, init: tg.initData }) }).catch(function () {}); } catch (e) {}
   }
   $('f-add').addEventListener('click', addSheet);
   $('f-scan').addEventListener('click', scanSheet);
