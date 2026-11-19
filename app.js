@@ -754,10 +754,104 @@
         setTimeout(function () { gi.select(); }, 50);
       });
   }
+  /* разбор текста этикетки: КБЖУ на 100 г */
+  function parseLabel(raw) {
+    var t = String(raw || '').toLowerCase().replace(/ё/g, 'е')
+      .replace(/[–—−]/g, '-')
+      .replace(/(\d)\s*[,]\s*(\d)/g, '$1.$2')
+      .replace(/(\d)[оo](?=[\d\s.,гg%])/g, '$10').replace(/(\d)[оo]\b/g, '$10')
+      .replace(/(\d)\s*[.]\s*(\d)/g, '$1.$2')
+      .replace(/\s+/g, ' ');
+    var NUM = /(\d{1,4}(?:\.\d{1,2})?)/;
+    function after(re, max) {
+      var m, best = null, rx = new RegExp(re.source, 'g');
+      while ((m = rx.exec(t))) {
+        var tail = t.slice(m.index + m[0].length, m.index + m[0].length + 40);
+        var n = tail.match(NUM);
+        if (n && n.index <= 30) {
+          var v = parseFloat(n[1]);
+          if (v <= max) { best = v; break; }
+        }
+      }
+      return best;
+    }
+    var p = after(/(б[iіi1l]лк|белк|протеин|protein|białk|bialk)[а-яa-zіїєґ]*/, 100);
+    var f = after(/(?:^|[^а-яa-zіїєґ])(жир(?!н)|fat\b|tłuszcz|tluszcz)[а-яa-zіїєґ]*/, 100);
+    var c = after(/(глевод|carbohydr|węglowod|weglowod)[а-яa-zіїєґ]*/, 100);
+    var k = null;
+    /* пара кДж/ккал: первое ≈ 4,18 × второе */
+    var rxp = /(\d{2,4}(?:\.\d)?)\s*(?:кдж|kj|кдж\.)?\s*[\/|\\]\s*(\d{1,3}(?:\.\d)?)/g, m;
+    while ((m = rxp.exec(t))) {
+      var a = parseFloat(m[1]), b = parseFloat(m[2]);
+      if (b > 0 && a / b > 3.9 && a / b < 4.4) { k = b; break; }
+      if (a > 0 && b / a > 3.9 && b / a < 4.4) { k = a; break; }
+    }
+    if (k == null) { var m1 = t.match(/(\d{1,3}(?:\.\d)?)\s*(?:ккал|kcal|ккал\.)/); if (m1) k = parseFloat(m1[1]); }
+    if (k == null) k = after(/(ккал|kcal|калор[iі]йн[а-яіїє]*|калорийн[а-я]*)/, 950);
+    var calc = (p || 0) * 4 + (f || 0) * 9 + (c || 0) * 4;
+    if ((k == null || k > 950) && calc > 0) k = Math.round(calc);
+    var got = [k, p, f, c].filter(function (v) { return v != null; }).length;
+    var warn = k != null && calc > 0 && Math.abs(calc - k) / Math.max(k, 1) > 0.25;
+    return { k: k, p: p, f: f, c: c, got: got, warn: warn };
+  }
+
+  /* КБЖУ по фото этикетки: распознавание прямо в телефоне (Tesseract.js, файлы в lib/ocr), фото никуда не отправляется */
+  var ocrW = null, ocrLog = null;
+  function loadOCR(cb) {
+    if (window.Tesseract) return cb(true);
+    var s = document.createElement('script'); s.src = 'lib/ocr/tesseract.min.js?v=7.0.0';
+    s.onload = function () { cb(!!window.Tesseract); }; s.onerror = function () { cb(false); }; document.head.appendChild(s);
+  }
+  function ocrWorker() {
+    if (ocrW) return ocrW;
+    var base = location.href.replace(/[#?].*$/, '').replace(/[^\/]*$/, '') + 'lib/ocr/';
+    ocrW = new Promise(function (res, rej) {
+      loadOCR(function (ok) {
+        if (!ok) return rej(new Error('load'));
+        window.Tesseract.createWorker(['rus', 'ukr'], 1, {
+          workerPath: base + 'worker.min.js?v=7.0.0', corePath: base + 'core', langPath: base + 'lang', workerBlobURL: false,
+          logger: function (m) { if (ocrLog) ocrLog(m); }, errorHandler: function () {}
+        }).then(function (w) { return w.setParameters({ tessedit_pageseg_mode: '4' }).then(function () { return w; }); }).then(res, rej);
+      });
+    });
+    ocrW.catch(function () { ocrW = null; });
+    return ocrW;
+  }
+  function prepImage(file) {
+    return new Promise(function (res, rej) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, m = Math.max(w, h), s = m > 2200 ? 2200 / m : m < 1400 ? 1400 / m : 1;
+        var cv = document.createElement('canvas'); cv.width = Math.round(w * s); cv.height = Math.round(h * s);
+        var x = cv.getContext('2d'); x.drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+        var d = x.getImageData(0, 0, cv.width, cv.height), a = d.data, hist = new Uint32Array(256), i, g, n = a.length / 4;
+        for (i = 0; i < a.length; i += 4) { g = (a[i] * 77 + a[i + 1] * 150 + a[i + 2] * 29) >> 8; a[i] = g; hist[g]++; }
+        var lo = 0, hi = 255, acc = 0;
+        while (lo < 255 && (acc += hist[lo]) < n * 0.01) lo++;
+        acc = 0; while (hi > 0 && (acc += hist[hi]) < n * 0.01) hi--;
+        var k = hi > lo + 20 ? 255 / (hi - lo) : 1;
+        for (i = 0; i < a.length; i += 4) { g = Math.max(0, Math.min(255, (a[i] - lo) * k)); a[i] = a[i + 1] = a[i + 2] = g; }
+        x.putImageData(d, 0, 0); res(cv);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('img')); };
+      img.src = url;
+    });
+  }
+  function rotCanvas(cv, deg) {
+    var r = document.createElement('canvas'); r.width = cv.height; r.height = cv.width;
+    var x = r.getContext('2d'); x.translate(r.width / 2, r.height / 2); x.rotate(deg * Math.PI / 180); x.drawImage(cv, -cv.width / 2, -cv.height / 2);
+    return r;
+  }
+  function readLabel(w, cv) {
+    var best = null;
+    function run(img) { return w.recognize(img, { rotateAuto: true }).then(function (r) { var p = parseLabel(r.data.text); if (!best || p.got > best.got) best = p; return p; }); }
+    return run(cv).then(function (p) { return p.got >= 3 ? p : run(rotCanvas(cv, 90)).then(function (q) { return q.got >= 3 ? q : run(rotCanvas(cv, -90)); }); }).then(function () { return best; });
+  }
   function ownSheet(pre) {
     pre = pre || {};
     openSheet('Свой продукт', pre.bc ? 'Новый продукт по штрихкоду' : 'Свой продукт',
-      (pre.bc ? '<p class="muted small">Штрихкод ' + esc(pre.bc) + ' пока нет в базах. Перепиши КБЖУ с упаковки один раз — и этот продукт будет находиться по штрихкоду у всех на ферме.</p>' : '<p class="muted small">Значения бери с упаковки, на 100 г.</p>') +
+      (pre.bc ? '<p class="muted small">Штрихкод ' + esc(pre.bc) + ' пока нет в базах. Сфоткай табличку КБЖУ или перепиши цифры с упаковки один раз — и этот продукт будет находиться по штрихкоду у всех на ферме.</p>' : '<p class="muted small">Значения бери с упаковки, на 100 г.</p>') +
+      '<button class="btn ghost" type="button" id="o-ph" style="margin-bottom:6px">Заполнить по фото этикетки</button><input type="file" id="o-file" accept="image/*" hidden><p class="muted small" id="o-st" hidden></p>' +
       '<div class="field"><label for="on">Название</label><div class="tinput"><input id="on" value="' + esc(pre.n || '') + '" placeholder="Например, Творог Простоквашино 5%"></div></div>' +
       '<div class="grid4">' + [['ok', 'Ккал', pre.k], ['op', 'Белки', pre.p], ['of', 'Жиры', pre.f], ['oc', 'Углев.', pre.c]].map(function (m) { return '<div class="field"><label for="' + m[0] + '">' + m[1] + '</label><div class="tinput num"><input id="' + m[0] + '" inputmode="decimal" value="' + (m[2] != null ? m[2] : '') + '"></div></div>'; }).join('') + '</div>' +
       '<div class="err" id="oe" hidden></div><button class="btn" type="button" id="osave">Сохранить и выбрать вес</button>',
@@ -771,6 +865,27 @@
           Store.set('cp', S.custom);
           if (pre.bc) sharedPut(pre.bc, { n: n, k: r1(k), p: r1(p), f: r1(f), c: r1(c) });
           amountSheet({ n: n, k: r1(k), p: r1(p), f: r1(f), c: r1(c), u: null });
+        });
+        var ph = b.querySelector('#o-ph'), fi = b.querySelector('#o-file'), st = b.querySelector('#o-st');
+        function say(t) { st.textContent = t; st.hidden = !t; }
+        ph.addEventListener('click', function () { fi.value = ''; fi.click(); ocrWorker(); });
+        fi.addEventListener('change', function () {
+          var file = fi.files && fi.files[0]; if (!file) return;
+          ph.disabled = true; say('Читаю этикетку…');
+          ocrLog = function (m) {
+            if (m.status === 'recognizing text') say('Читаю этикетку… ' + Math.round((m.progress || 0) * 100) + '%');
+            else if (/load|initializ/.test(m.status || '')) say('Загружаю распознавание. Первый раз около 7 МБ, потом мгновенно.');
+          };
+          Promise.all([ocrWorker(), prepImage(file)]).then(function (r) { return readLabel(r[0], r[1]); }).then(function (res) {
+            if (!document.body.contains(b)) return;
+            [['ok', res.k], ['op', res.p], ['of', res.f], ['oc', res.c]].forEach(function (x) { if (x[1] != null) b.querySelector('#' + x[0]).value = String(x[1]).replace('.', ','); });
+            if (!res.got) say('Не разобрал цифры. Сфоткай ближе только табличку КБЖУ — ровно, без бликов, при хорошем свете. Или впиши вручную.');
+            else if (res.got < 4) say('Нашёл не всё — проверь цифры и допиши пустые поля.');
+            else if (res.warn) say('Цифры не сходятся между собой — сверь их с упаковкой.');
+            else say('Готово. Сверь цифры с упаковкой (на 100 г) и впиши название.');
+            if (res.got) haptic('ok');
+            var nm = b.querySelector('#on'); if (res.got && !nm.value) nm.focus();
+          }).catch(function () { say('Не получилось прочитать фото. Впиши цифры вручную.'); }).then(function () { ph.disabled = false; ocrLog = null; });
         });
         setTimeout(function () { b.querySelector(pre.n ? '#ok' : '#on').focus(); }, 50);
       });
