@@ -289,6 +289,7 @@ body.in-session nav.tabs { display: none; }
 
 /* technique */
 .anim { position: relative; background: #1a1a1a; border-radius: 12px; border: 1px solid var(--line); aspect-ratio: 570 / 768; width: min(100%, calc(56vh * 570 / 768)); align-self: center; overflow: hidden; }
+.anim.wide { aspect-ratio: 3 / 2; width: 100%; }
 .anim img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .anim img.f2 { animation: gp-loop 2.4s ease-in-out infinite; }
 @keyframes gp-loop { 0%, 30% { opacity: 0; } 50%, 80% { opacity: 1; } 100% { opacity: 0; } }
@@ -425,6 +426,6 @@ body.in-session nav.tabs { display: none; }
   <div class="stack" id="sheet-body" style="gap:14px"></div>
 </div></div>
 
-<script src="app.js?v=6418cfb2cd"></script>
+<script src="app.js?v=209b48fc96"></script>
 </body>
 </html>
