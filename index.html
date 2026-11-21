@@ -307,6 +307,43 @@ body.in-session nav.tabs { display: none; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .stat b { display: block; font-family: var(--display); font-weight: 700; font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
 .stat span { font-size: 12px; color: var(--muted); }
+
+/* гайд по спортпиту */
+#v-sp { position: relative; }
+.sp-x { position: absolute; top: 10px; left: 10px; z-index: 2; background: rgba(10,10,10,.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.sp-hero { position: relative; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); aspect-ratio: 720 / 809; max-height: 72vh; background: #000; }
+.sp-hero img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.sp-hero-t { position: absolute; left: 0; right: 0; bottom: 0; padding: 70px 18px 18px; background: linear-gradient(to bottom, rgba(10,10,10,0), rgba(10,10,10,.88) 45%, #0a0a0a); display: flex; flex-direction: column; gap: 6px; }
+.sp-hero-t h1 { font-size: 34px; line-height: 1; }
+.sp-hero-t p { font-size: 14px; color: var(--muted); }
+.sp-ban { width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: cover; border-radius: 10px; display: block; }
+.sp-intro p, .sp-sets p, .sp-det p, .sp-tier p { font-size: 14.5px; line-height: 1.5; color: #d6d6d6; }
+.sp-call { background: var(--fg); color: var(--bg); border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 14.5px; line-height: 1.4; }
+.sp-lrow { display: grid; grid-template-columns: 142px 1fr; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); line-height: 1.35; }
+.sp-pill { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; border-radius: 999px; padding: 4px 9px; white-space: nowrap; justify-self: start; flex: 0 0 auto; }
+.sp-pill.b { background: var(--fg); color: var(--bg); border: 1px solid var(--fg); }
+.sp-pill.s { background: #2a2a2a; color: var(--fg); border: 1px solid #2a2a2a; }
+.sp-pill.n { background: transparent; color: #a8a8a8; border: 1px dashed #6a6a6a; }
+.sp-it { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.sp-it.open { border-color: #3d3d3d; }
+.sp-row { appearance: none; width: 100%; font: inherit; color: var(--fg); background: none; border: 0; padding: 14px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
+.sp-row b { flex: 1 1 auto; font-family: var(--display); font-weight: 600; font-size: 16px; line-height: 1.2; text-transform: uppercase; overflow-wrap: break-word; hyphens: auto; }
+.tile.wide { grid-column: 1 / -1; min-height: 0; flex-direction: row; align-items: center; justify-content: flex-start; gap: 14px; }
+.sp-row .chev { width: 18px; height: 18px; flex: 0 0 auto; color: var(--muted); transition: transform .2s; }
+.sp-it.open .chev { transform: rotate(180deg); }
+.sp-det { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+.sp-det > div { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.sp-sets h2 { font-size: 26px; line-height: 1.05; }
+.sp-sets .goals { grid-template-columns: repeat(3, 1fr); }
+.sp-sets .goal { align-items: center; text-align: center; padding: 10px 6px; }
+.sp-sets .goal { justify-content: center; }
+.sp-sets .goal b { font-size: 12.5px; letter-spacing: 0; white-space: nowrap; overflow-wrap: normal; }
+.sp-sets .goal[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.sp-tier { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.sp-end { position: relative; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); aspect-ratio: 720 / 900; max-height: 70vh; }
+.sp-end img { width: 100%; height: 100%; object-fit: cover; object-position: bottom; display: block; }
+.sp-end-t { position: absolute; left: 0; right: 0; top: 0; padding: 22px 18px 90px; background: linear-gradient(to bottom, #0a0a0a 35%, rgba(10,10,10,0)); text-align: center; }
+.sp-end-t h2 { font-size: 36px; line-height: 1; }
 </style>
 </head>
 <body>
@@ -370,6 +407,12 @@ body.in-session nav.tabs { display: none; }
     <button class="btn ghost" id="hd-del" type="button">Удалить тренировку</button>
   </section>
 
+  <!-- SPORTPIT GUIDE -->
+  <section class="view" id="v-sp" hidden>
+    <button class="x sp-x" id="sp-close" type="button" aria-label="Назад"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <div class="stack" id="sp-body" style="gap:14px"></div>
+  </section>
+
   <!-- FOOD -->
   <section class="view" id="v-food" hidden>
     <div id="coach-food" hidden></div>
@@ -426,6 +469,6 @@ body.in-session nav.tabs { display: none; }
   <div class="stack" id="sheet-body" style="gap:14px"></div>
 </div></div>
 
-<script src="app.js?v=64725dce45"></script>
+<script src="app.js?v=086a5bb923"></script>
 </body>
 </html>
