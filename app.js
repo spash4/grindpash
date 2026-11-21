@@ -79,8 +79,9 @@
   function calc(weight, fat, g) {
     var lbm = weight * (1 - fat / 100), kcal, p, f;
     if (g === 'mass') { kcal = lbm * 34 + 350; p = weight * 1.6; f = lbm * 1.1; }
-    else if (g === 'recomp') { kcal = lbm * 34 - 200; p = lbm * 2.5; f = lbm; }
-    else { kcal = Math.max(lbm * 34 * 0.8, 1500); p = lbm * 2.5; f = lbm * 0.8; }
+    else if (g === 'recomp') { kcal = Math.max(lbm * 34 - 200, 1200); p = lbm * 2.5; f = lbm; }
+    /* сушка никогда не выше рекомпозиции; нижняя граница общая — 1200 ккал */
+    else { kcal = Math.min(Math.max(lbm * 34 * 0.8, 1200), Math.max(lbm * 34 - 200, 1200)); p = lbm * 2.5; f = lbm * 0.8; }
     return { kcal: Math.round(kcal), p: Math.round(p), f: Math.round(f), c: Math.round((kcal - p * 4 - f * 9) / 4) };
   }
   function profForm(host, pr) {
