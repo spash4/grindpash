@@ -502,7 +502,6 @@
         '<div class="goals" id="sp-g">' + SP.sets.map(function (st, i) { return '<button type="button" class="goal" data-g="' + i + '" aria-pressed="' + (spGoal === i) + '"><b>' + ['Масса', 'Рекомпозиция', 'Сушка'][i] + '</b></button>'; }).join('') + '</div>' +
         '<div class="stack" style="gap:8px">' + SP.tiers.map(function (t, j) { return '<div class="sp-tier"><span class="label">' + t + '</span><p>' + esc(SP.sets[spGoal][1][j]) + '</p></div>'; }).join('') + '</div></div>' +
       '<div class="sp-end"><img src="sp/end.webp?v=1" alt="" width="720" height="900"><div class="sp-end-t"><h2>Ешь.<br>Тренируйся.<br>Спи.</h2></div></div>' +
-      '<button class="btn" type="button" id="sp-pdf">Скачать гайд в PDF</button>' +
       '<p class="small muted">' + esc(SP.note) + '</p>';
     $('sp-body').querySelectorAll('#sp-f .chip').forEach(function (b) { b.addEventListener('click', function () { haptic(); spF = b.dataset.f; renderSp(); }); });
     $('sp-body').querySelectorAll('#sp-g .goal').forEach(function (b) { b.addEventListener('click', function () { haptic(); spGoal = +b.dataset.g; var y = window.scrollY; renderSp(); window.scrollTo(0, y); }); });
@@ -511,12 +510,6 @@
       d.hidden = !open; b.setAttribute('aria-expanded', open); b.parentNode.classList.toggle('open', open);
       if (open) spOpen[i] = 1; else delete spOpen[i];
     }); });
-    $('sp-pdf').addEventListener('click', function () {
-      haptic(); var url = location.href.replace(/[#?].*$/, '').replace(/[^\/]*$/, '') + 'sp/grindpash-sportpit.pdf';
-      try { if (tg && tg.downloadFile && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) return tg.downloadFile({ url: url, file_name: 'GrindPash_спортпит.pdf' }); } catch (e) {}
-      try { if (tg && tg.openLink) return tg.openLink(url); } catch (e) {}
-      window.open(url, '_blank', 'noopener');
-    });
   }
 
   function renderHome() {
