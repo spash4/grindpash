@@ -772,8 +772,12 @@
       }).join('');
       $('f-sum').textContent = a.length ? Math.round(s.k) + ' ккал' : '';
       $('f-list').innerHTML = a.length ? a.map(function (e, i) {
-        return '<div class="entry"><div class="nm"><b>' + esc(e[0]) + '</b><span>' + e[1] + ' г · Б ' + fmt(e[3]) + ' · Ж ' + fmt(e[4]) + ' · У ' + fmt(e[5]) + '</span></div><span class="k">' + Math.round(e[2]) + '</span><button type="button" class="del" data-i="' + i + '" aria-label="Удалить ' + esc(e[0]) + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
+        return '<div class="entry"><button type="button" class="nm" data-i="' + i + '" aria-label="Изменить вес: ' + esc(e[0]) + '"><b>' + esc(e[0]) + '</b><span>' + fmt(e[1]) + ' г ✎ · Б ' + fmt(e[3]) + ' · Ж ' + fmt(e[4]) + ' · У ' + fmt(e[5]) + '</span></button><span class="k">' + Math.round(e[2]) + '</span><button type="button" class="del" data-i="' + i + '" aria-label="Удалить ' + esc(e[0]) + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
       }).join('') : '<p class="empty">Пока ничего. Нажми «Добавить еду» или отсканируй штрихкод упаковки.</p>';
+      $('f-list').querySelectorAll('.entry .nm').forEach(function (b) { b.addEventListener('click', function () {
+        var i = +b.dataset.i, e = a[i]; if (!e || !(e[1] > 0)) return; var q = 100 / e[1]; haptic();
+        amountSheet({ n: e[0], k: r1(e[2] * q), p: r1(e[3] * q), f: r1(e[4] * q), c: r1(e[5] * q), u: null }, { iso: iso, i: i, g: e[1] });
+      }); });
       $('f-list').querySelectorAll('.del').forEach(function (b) { b.addEventListener('click', function () { S.food[iso].splice(+b.dataset.i, 1); saveDay(iso); haptic(); renderFood(); }); });
     });
   }
@@ -807,21 +811,23 @@
         setTimeout(function () { q.focus(); }, 50);
       });
   }
-  function amountSheet(f) {
-    var g0 = f.u ? f.u[1] : 100;
+  function amountSheet(f, ed) {
+    var g0 = ed ? ed.g : f.u ? f.u[1] : 100;
     openSheet('Питание · ' + human(S.day), f.n,
       '<p class="muted small">На 100 г: ' + f.k + ' ккал · Б ' + fmt(f.p) + ' · Ж ' + fmt(f.f) + ' · У ' + fmt(f.c) + '</p>' +
-      '<div class="field"><label for="g">Сколько грамм</label><div class="tinput num"><input id="g" inputmode="decimal" value="' + g0 + '"><em>г</em></div></div>' +
+      '<div class="field"><label for="g">Сколько грамм — впиши любое число</label><div class="tinput num gin"><input id="g" inputmode="decimal" autocomplete="off" value="' + g0 + '"><em>г</em></div></div>' +
       '<div class="chips" id="gq">' + (f.u ? '<button type="button" class="chip" data-g="' + f.u[1] + '">' + esc(f.u[0]) + ' · ' + f.u[1] + ' г</button><button type="button" class="chip" data-g="' + f.u[1] * 2 + '">×2</button>' : '') + [50, 100, 150, 200].map(function (g) { return '<button type="button" class="chip" data-g="' + g + '">' + g + ' г</button>'; }).join('') + '</div>' +
-      '<div class="preview" id="pv"></div><button class="btn" type="button" id="ok">Добавить</button>',
+      '<div class="preview" id="pv"></div><button class="btn" type="button" id="ok">' + (ed ? 'Сохранить' : 'Добавить') + '</button>',
       function (b) {
         var gi = b.querySelector('#g');
         function pv() { var g = num(gi.value) || 0, k = g / 100; b.querySelector('#pv').innerHTML = [['ккал', f.k * k, 0], ['белки', f.p * k, 1], ['жиры', f.f * k, 1], ['углев.', f.c * k, 1]].map(function (m) { return '<div><b>' + (m[2] ? fmt(m[1]) : Math.round(m[1])) + '</b><span>' + m[0] + '</span></div>'; }).join(''); }
         gi.addEventListener('input', pv); pv();
+        gi.addEventListener('focus', function () { setTimeout(function () { try { gi.select(); } catch (e) {} }, 0); });
         b.querySelectorAll('#gq .chip').forEach(function (c) { c.addEventListener('click', function () { gi.value = c.dataset.g; pv(); }); });
         b.querySelector('#ok').addEventListener('click', function () {
           var g = num(gi.value); if (!(g > 0 && g < 5000)) { gi.focus(); return; }
-          var k = g / 100, e = [f.n, Math.round(g), r1(f.k * k), r1(f.p * k), r1(f.f * k), r1(f.c * k)];
+          var k = g / 100, e = [f.n, r1(g), r1(f.k * k), r1(f.p * k), r1(f.f * k), r1(f.c * k)];
+          if (ed) return loadDay(ed.iso).then(function (a) { if (a[ed.i] && a[ed.i][0] === f.n) a[ed.i] = e; saveDay(ed.iso); haptic('ok'); closeSheet(); renderFood(); toast('Сохранено: ' + fmt(r1(g)) + ' г'); });
           loadDay(S.day).then(function (a) {
             a.push(e); saveDay(S.day); if (!S.prof.fu) { S.prof.fu = today(); Store.set('pr', S.prof); }
             S.recent = [f.n].concat(S.recent.filter(function (n) { return n !== f.n; })).slice(0, 10); Store.set('fr', S.recent);
