@@ -453,6 +453,81 @@ async function barcodeApi(request, env, url) {
   return json({ error: 'method' }, 405);
 }
 
+
+/* ---------- напоминания тренера (KV, привязка BC; данные в metadata ключа rem:<id>) ----------
+ * Приложение присылает расписание: дни недели и названия тренировок, часовой пояс.
+ * Cron раз в час: в 9:00 по времени человека — «сегодня тренировка», в 20:00 — «завтра тренировка».
+ * Если человек не открывал приложение 14 дней, напоминания не шлём. Если бот заблокирован — подписка удаляется.
+ */
+const REM_TODAY = [
+  '🔔 Сегодня тренировка: <b>%t</b>. Не пропусти.',
+  '🔔 Сегодня по плану <b>%t</b>. Зал ждёт, отмазки не принимаются.',
+  '🔔 Бык, сегодня <b>%t</b>. Наушники, вода, полотенце — и погнали.',
+  '🔔 Сегодня твой день: <b>%t</b>. Поешь за 1,5–2 часа до зала.',
+  '🔔 Тренировка сегодня — <b>%t</b>. Жду хотя бы +1 повтор в каждом упражнении.',
+];
+const REM_TOMORROW = [
+  'Завтра тренировка: <b>%t</b>. Ляг пораньше и добери белок.',
+  'Напоминаю: завтра <b>%t</b>. Восстанавливайся, чтобы прийти злым.',
+  'Завтра по плану <b>%t</b>. Сон 7–9 часов — это тоже тренировка.',
+  'Готовься, завтра <b>%t</b>. Сегодня поешь нормально, чтобы были силы.',
+];
+const REM_KB = { inline_keyboard: [[{ text: '🐂 Открыть тренировку', web_app: { url: APP_URL } }]] };
+
+function cleanSched(a) {
+  if (!Array.isArray(a)) return null;
+  const out = [], seen = {};
+  for (const x of a.slice(0, 7)) {
+    const d = Number(x && x[0]), t = String((x && x[1]) || '').replace(/[<>|:]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!Number.isInteger(d) || d < 0 || d > 6 || !t || seen[d]) continue;
+    seen[d] = 1; out.push(d + ':' + t);
+  }
+  return out.join('|');
+}
+
+async function remApi(request, env) {
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!env.BC) return json({ error: 'storage' }, 503);
+  const raw = await request.text();
+  if (raw.length > 6000) return json({ error: 'size' }, 413);
+  let b; try { b = JSON.parse(raw); } catch (e) { return json({ error: 'json' }, 400); }
+  const user = await checkInit(b.init, env.BOT_TOKEN);
+  if (!user) return json({ error: 'auth' }, 401);
+  const key = 'rem:' + user.id;
+  if (!b.on) { await env.BC.delete(key); return json({ ok: true, on: false }); }
+  const tz = Math.round(Number(b.tz));
+  if (!Number.isFinite(tz) || tz < -720 || tz > 840) return json({ error: 'tz' }, 400);
+  const s = cleanSched(b.s);
+  if (s === null) return json({ error: 'data' }, 400);
+  await env.BC.put(key, '', { metadata: { tz, s, u: Date.now() } });
+  return json({ ok: true, on: true });
+}
+
+async function remindAll(env) {
+  if (!env.BC) return;
+  const now = Date.now();
+  let cursor;
+  do {
+    const r = await env.BC.list({ prefix: 'rem:', cursor, limit: 1000 });
+    for (const k of r.keys) {
+      const m = k.metadata || {};
+      if (!m.s || now - (m.u || 0) > 14 * 864e5) continue;
+      const local = new Date(now + (m.tz || 0) * 60000), h = local.getUTCHours(), dow = local.getUTCDay();
+      const sched = {};
+      String(m.s).split('|').forEach((x) => { const i = x.indexOf(':'); if (i > 0) sched[x.slice(0, i)] = x.slice(i + 1); });
+      let text = null;
+      const seed = local.getUTCDate() + Number(k.name.slice(4)) % 7;
+      if (h === 9 && sched[dow]) text = REM_TODAY[seed % REM_TODAY.length].replace('%t', esc(sched[dow]));
+      else if (h === 20 && sched[(dow + 1) % 7]) text = REM_TOMORROW[seed % REM_TOMORROW.length].replace('%t', esc(sched[(dow + 1) % 7]));
+      if (!text) continue;
+      const res = await tg(env, 'sendMessage', { chat_id: Number(k.name.slice(4)), text, parse_mode: 'HTML', reply_markup: REM_KB });
+      if (!res.ok && (res.error_code === 403 || res.error_code === 400)) await env.BC.delete(k.name);
+    }
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+}
+
 const TEXT = { 'content-type': 'text/plain; charset=utf-8' };
 
 export default {
@@ -460,6 +535,7 @@ export default {
     if (!env.BOT_TOKEN) return new Response('BOT_TOKEN не задан в настройках воркера', { status: 500, headers: TEXT });
     const url = new URL(request.url);
     if (url.pathname === '/bc' || url.pathname.startsWith('/bc/')) return barcodeApi(request, env, url);
+    if (url.pathname === '/rem') return remApi(request, env);
     const secret = await secretOf(env.BOT_TOKEN);
 
     if (request.method === 'GET' && url.pathname === '/setup') {
@@ -498,5 +574,8 @@ export default {
     }
 
     return new Response('GrindPash bot', { status: 404, headers: TEXT });
+  },
+  async scheduled(event, env, ctx) {
+    if (env.BOT_TOKEN) ctx.waitUntil(remindAll(env));
   },
 };

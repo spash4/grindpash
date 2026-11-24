@@ -117,7 +117,7 @@
     var nd = d + 1, nw = wk;
     if (nd >= PROG[nw - 1].days.length) { nd = 0; nw++; }
     if (nw > WK) { nw = 1; S.prof.cycle = (S.prof.cycle || 1) + 1; }
-    S.prof.wk = nw; S.prof.day = nd; Store.set('pr', S.prof);
+    S.prof.wk = nw; S.prof.day = nd; Store.set('pr', S.prof); remSync();
   }
   function parsePlan(s) {
     var m = String(s).match(/^(\d+)(?:\s*–\s*(\d+))?\s*×\s*(\d+)(?:\s*–\s*(\d+))?/);
@@ -320,29 +320,101 @@
       return { lvl: 0, msg: '' };
     });
   }
-  function coachPlan(day) {
+  function coachPlan(day, noHead) {
     if (S.prof.np) return 'Выбирай программу тренировок и погнали.';
     var title = '<b>' + esc(day.title) + '</b>', up = [], seen = 0;
-    if (PROG[S.prof.wk - 1].deload) return 'Следующая тренировка — ' + title + '. Разгрузка: 40% от рабочего веса, по 15 повторов. Отдыхаем, чтобы потом расти.';
+    if (PROG[S.prof.wk - 1].deload) return (noHead ? '' : 'Следующая тренировка — ' + title + '. ') + 'Разгрузка: 40% от рабочего веса, по 15 повторов. Отдыхаем, чтобы потом расти.';
     day.ex.forEach(function (x) { var p = parsePlan(x.sets), n = swapName(x.name); if (p.free || isCardio(n) || !lastOf(n)) return; seen++; var o = suggest(n, p)[0]; if (o && /^Повышай|отягощение/.test(o.t)) up.push(n); });
-    var h = 'Следующая тренировка — ' + title + '. ';
+    var si0 = schedInfo(), h = noHead ? '' : 'Следующая тренировка — ' + title + (si0 && si0.ahead > 1 && si0.st !== 'missed' ? ' ' + si0.when : '') + '. ';
     if (up.length) h += 'Повышаем вес: <b>' + up.slice(0, 3).map(esc).join(', ') + (up.length > 3 ? ' и ещё ' + (up.length - 3) : '') + '</b>. В остальном добавляем повтор.';
     else if (seen) h += 'Задача простая: побить прошлый раз хотя бы на один повтор в каждом упражнении.';
     else h += 'Подбирай вес на нижнюю границу повторов, 1–2 в запасе. Дальше веса веду я.';
     return h;
+  }
+
+  /* тренер знает день недели: сегодня / завтра / отдых / пропуск. Фразы меняются каждый день. */
+  var DOW = { 'Вс': 0, 'Пн': 1, 'Вт': 2, 'Ср': 3, 'Чт': 4, 'Пт': 5, 'Сб': 6 };
+  var DOW_V = ['в воскресенье', 'в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу'];
+  function dayPick(a, salt) { var s = today() + '|' + (salt || ''), h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return a[Math.abs(h) % a.length]; }
+  function fillT(t, o) { return t.replace(/%t/g, '<b>' + esc(o.title) + '</b>').replace(/%w/g, o.when || '').replace(/%W/g, o.when ? o.when.charAt(0).toUpperCase() + o.when.slice(1) : ''); }
+  function schedInfo() {
+    if (!S.prof || S.prof.np) return null;
+    var day = dayOf(S.prof.wk, S.prof.day), dn = day && DOW[day.short]; if (dn == null) return null;
+    var td = new Date().getDay(), ahead = (dn - td + 7) % 7, back = (td - dn + 7) % 7;
+    var lastIso = S.logs.length ? isoOf(S.logs[0].ts) : '', occ = shiftDay(today(), -back), since = String(S.prof.since || today()).slice(0, 10);
+    var st = lastIso === today() ? 'done' : ahead === 0 ? 'today' : ahead === 1 ? 'tomorrow' : (back > 0 && back <= 3 && lastIso < occ && occ >= since) ? 'missed' : 'rest';
+    return { st: st, day: day, title: day.title, when: DOW_V[dn], ahead: ahead };
+  }
+  var CL = {
+    today: ['Сегодня по плану %t. Не пропусти.', 'Сегодня тренировка: %t. Зал ждёт, отмазки не принимаются.', 'Сегодня твой день — %t. Поешь за 1,5–2 часа до зала, и вперёд.', 'Тренировка сегодня: %t. Сделаешь — день прожит не зря.', 'По плану сегодня %t. Наушники, вода, полотенце — и погнали.', 'Сегодня %t. Жду от тебя хотя бы +1 повтор в каждом упражнении.'],
+    tomorrow: ['Завтра тренировка: %t. Сегодня ляг пораньше и добери белок.', 'Завтра по плану %t. Восстанавливайся, чтобы прийти злым.', 'Готовься: завтра %t. Сон 7–9 часов — это тоже тренировка.', 'Завтра %t. Сегодня поешь нормально, чтобы были силы.', 'Напоминаю: завтра %t. Без пропусков.'],
+    rest: ['Сегодня отдых. Мышцы растут, пока ты восстанавливаешься. Следующая тренировка — %t %w.', 'Выходной от зала. Ешь, спи, гуляй. %W — %t.', 'Сегодня без зала, но еда и сон по плану. Дальше — %t %w.', 'День отдыха. Не путай с днём обжорства 😏 %W — %t.'],
+    missed: ['%W по плану была тренировка %t. Не сделал? Сегодня догоняй.', 'Тренировка %t была %w, а ты её пропустил. Сегодня самое время.', 'Тренировка %t висит с прошлого раза. Сделай сегодня, не копи долги.'],
+    done: ['Сегодня отработал 💪 Теперь еда и сон — без них прогресса не будет.', 'Тренировка закрыта. Уважаю. Добери белок и ложись вовремя.', 'Сегодня ты сделал работу. Остальное — за едой и сном.', 'Зачёт за сегодня ✅ Мышцы растут не в зале, а после него.']
+  };
+  var CL_TAIL = ['Дисциплина бьёт мотивацию. Мотивация уходит, привычка остаётся.', 'Лучшая программа — та, которую ты реально делаешь.', 'Прогресс — это +1 повтор, а не +10 кг за неделю.', 'Последние 2 повтора в подходе — самые важные. Не сливай их.', 'Техника важнее веса. Сломанный бык не растёт.', 'Белок каждый день, а не только в дни тренировок.', 'Не сравнивай себя с другими. Сравнивай с собой месяц назад.', 'Сон — бесплатный анаболик. Пользуйся.', 'Записывай веса. Что не измеряешь — тем не управляешь.', 'Вода: 2–3 литра в день, особенно на креатине.', 'Пропустил одну тренировку — не беда. Пропустил две — уже привычка.', 'Результат приходит к тем, кто не бросает на третьей неделе.', 'Разминка — не для слабаков. Это чтобы не стать слабаком.', 'Мышцам похуй на твоё настроение. Им важно, что ты пришёл.', 'Сначала форма, потом вес. Потом снова вес.'];
+  var CL_DOW = { 1: 'Понедельник — лучший день начать.', 5: 'Пятница. Сначала зал, потом всё остальное.', 6: 'Суббота — не повод забить на еду.', 0: 'Воскресенье. Подготовь еду на неделю — и половина дела сделана.' };
+  function greet() {
+    var h = new Date().getHours();
+    return h < 5 ? 'Ты чего не спишь? Сон — это тоже рост.' : h < 12 ? dayPick(['Доброе утро.', 'Утро. Подъём.', 'Проснулся? Отлично.'], 'gm') : h < 18 ? dayPick(['Здарова.', 'На связи.', 'Ну что, как день?'], 'ga') : dayPick(['Добрый вечер.', 'Вечер. Подводим итоги.', 'Здарова.'], 'ge');
+  }
+  function schedLine(si) { return si ? fillT(dayPick(CL[si.st], si.st), si) : ''; }
+  function coachPopOnce() {
+    if (!coachOn() || S.draft) return;
+    var si = schedInfo(); if (!si || (si.st !== 'today' && si.st !== 'tomorrow' && si.st !== 'missed')) return;
+    try { if (localStorage.getItem('gp-cpop') === today() + si.st) return; localStorage.setItem('gp-cpop', today() + si.st); } catch (e) {}
+    setTimeout(function () { coachSay((si.st === 'today' ? '🔔 ' : '') + schedLine(si), trainMood().lvl); clearTimeout(coachSay._t); coachSay._t = setTimeout(function () { $('cpop').hidden = true; }, 7000); }, 900);
+  }
+
+  /* напоминания от тренера в Telegram: расписание уходит на сервер бота, бот пишет в 9:00 и 20:00 */
+  function remSched() {
+    /* ближайшие 7 дней по календарю: следующая тренировка программы ставится на свой день недели */
+    if (!S.prof || S.prof.np) return [];
+    var wk = S.prof.wk, d = S.prof.day, out = [], td = new Date().getDay();
+    for (var i = 0; i < 7; i++) {
+      var dow = (td + i) % 7, day = dayOf(wk, d);
+      if (!day || DOW[day.short] == null) break;
+      if (DOW[day.short] === dow) { out.push([dow, day.title]); d++; if (d >= PROG[wk - 1].days.length) { d = 0; wk = wk >= WK ? 1 : wk + 1; } }
+    }
+    return out;
+  }
+  function remSync(force) {
+    if (!inTg || !S.prof || !S.prof.rem) return Promise.resolve(false);
+    var body = { s: remSched(), tz: -new Date().getTimezoneOffset() }, sig = JSON.stringify(body), old = '';
+    try { old = localStorage.getItem('gp-rem') || ''; } catch (e) {}
+    var o = old.split('#'); if (!force && o[1] === sig && Date.now() - (+o[0] || 0) < 5 * 864e5) return Promise.resolve(true);
+    body.on = true; body.init = tg.initData;
+    return fetch(API + '/rem', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.ok) { try { localStorage.setItem('gp-rem', Date.now() + '#' + sig); } catch (e) {} return true; } return false;
+    }).catch(function () { return false; });
+  }
+  function remSet(on) {
+    if (!inTg) { toast('Напоминания работают только в Telegram'); return; }
+    function done(ok) { if (!ok) { toast('Не получилось. Попробуй позже'); return; } S.prof.rem = on; Store.set('pr', S.prof); if ($('p-rem')) $('p-rem').setAttribute('aria-pressed', String(on)); haptic('ok'); toast(on ? 'Тренер будет напоминать в Telegram 🔔' : 'Напоминания выключены'); renderCoachHome('coach-hub'); }
+    if (!on) { S.prof.rem = false; try { localStorage.removeItem('gp-rem'); } catch (e) {} fetch(API + '/rem', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ on: false, init: tg.initData }) }).then(function () { done(true); }).catch(function () { done(true); }); return; }
+    function go() { S.prof.rem = true; remSync(true).then(function (ok) { if (!ok) S.prof.rem = undefined; done(ok); }); }
+    var u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (u && u.allows_write_to_pm === false && tg.requestWriteAccess) { try { tg.requestWriteAccess(function (ok) { if (ok) go(); else toast('Без разрешения бот не сможет писать'); }); } catch (e) { go(); } }
+    else go();
   }
   function renderCoachHome(id) {
     var el = $(id || 'coach-home'); if (!coachOn()) { el.hidden = true; return; }
     var pr = S.prof, day = dayOf(pr.wk, pr.day), nm = (user && user.first_name) || pr.name || 'бык', tm = trainMood();
     foodMood().then(function (fm) {
       var mood = Math.max(tm.lvl, fm.lvl), h;
+      var si = schedInfo(), dow = new Date().getDay(), tail = CL_DOW[dow] && dayPick([0, 1], 'dw') ? CL_DOW[dow] : dayPick(CL_TAIL, 'tail');
+      var lead = si && si.st !== 'rest' ? schedLine(si) + ' ' : '', plan = si && (si.st === 'today' || si.st === 'tomorrow' || si.st === 'missed') ? coachPlan(day, true) : si && si.st === 'done' ? '' : coachPlan(day);
+      if (si && si.st === 'rest') plan = schedLine(si);
       if (S.draft) h = 'Тренировка не закончена. Возвращайся и добивай.';
-      else if (tm.never && tm.lvl === 0) h = 'Привет' + (nm !== 'бык' ? ', ' + esc(nm) : '') + '. Я твой тренер. Имя тебе знать не обязательно, называй меня просто <b>Тренер</b>.<p>Я веду тебя: подсказываю веса, слежу, чтобы ты не пропускал тренировки и записывал еду. Так что делай, как я говорю, не халтурь и подходи к тренировкам серьёзно.</p><p>' + coachPlan(day) + '</p>';
-      else if (tm.lvl === 2) h = '<b>' + tm.d + ' ' + plural(tm.d, 'день', 'дня', 'дней') + ' без зала.</b> Хватит отдыхать. ' + coachPlan(day) + ' Без отмазок.';
-      else if (tm.lvl === 1) h = '<b>' + tm.d + ' ' + plural(tm.d, 'день', 'дня', 'дней') + ' без тренировки.</b> Не расслабляйся. ' + coachPlan(day);
-      else h = (S.logs[0] && S.logs[0].pr && tm.d <= 1 ? 'Прошлая тренировка: ' + S.logs[0].pr + ' 🏆. Уважаю. ' : '') + coachPlan(day);
+      else if (tm.never && tm.lvl === 0) h = 'Привет' + (nm !== 'бык' ? ', ' + esc(nm) : '') + '. Я твой тренер. Имя тебе знать не обязательно, называй меня просто <b>Тренер</b>.<p>Я веду тебя: подсказываю веса, слежу, чтобы ты не пропускал тренировки и записывал еду. Так что делай, как я говорю, не халтурь и подходи к тренировкам серьёзно.</p><p>' + lead + coachPlan(day, !!lead) + '</p>';
+      else if (tm.lvl === 2) h = '<b>' + tm.d + ' ' + plural(tm.d, 'день', 'дня', 'дней') + ' без зала.</b> ' + dayPick(['Хватит отдыхать.', 'Ты там живой вообще?', 'Мышцы уже собирают вещи.', 'Я начинаю злиться.'], 'a2') + ' ' + coachPlan(day) + ' Без отмазок.';
+      else if (tm.lvl === 1) h = '<b>' + tm.d + ' ' + plural(tm.d, 'день', 'дня', 'дней') + ' без тренировки.</b> ' + dayPick(['Не расслабляйся.', 'Не превращай отдых в отпуск.', 'Пора возвращаться.'], 'a1') + ' ' + lead + coachPlan(day, !!lead);
+      else h = greet() + ' ' + (S.logs[0] && S.logs[0].pr && tm.d <= 1 ? 'Прошлая тренировка: ' + S.logs[0].pr + ' 🏆. Уважаю. ' : '') + lead + plan;
       if (fm.msg) h += '<p>' + fm.msg + '</p>';
+      else if (!S.draft && !(tm.never && tm.lvl === 0)) h += '<p class="tail">' + tail + '</p>';
+      if (inTg && S.prof.rem === undefined && !S.prof.np && !S.draft) h += '<p><button type="button" class="chip rem-on">🔔 Напоминать о тренировках в Telegram</button></p>';
       el.innerHTML = coachHTML(h, mood); el.hidden = false;
+      var rb = el.querySelector('.rem-on'); if (rb) rb.addEventListener('click', function (e) { e.stopPropagation(); remSet(true); });
     });
   }
   function renderCoachFood() {
@@ -545,7 +617,7 @@
       b.querySelectorAll('button.pcard').forEach(function (btn) { btn.addEventListener('click', function () {
         var k = btn.dataset.p;
         if (k === pk) { closeSheet(); show('train'); return; }
-        S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
+        S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null; remSync();
         haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
       }); });
     });
@@ -571,7 +643,7 @@
     openSheet('Программа', PROGS[k].t, '<p class="muted">' + PDESC[k] + '</p><p class="small muted">Начнёшь с первой недели. История и веса сохранятся, подсказки по весам продолжат работать для тех же упражнений.</p><button class="btn" type="button" id="pg-yes">Перейти на «' + PROGS[k].t + '»</button><button class="btn ghost" type="button" id="pg-no">Отмена</button>', function (b) {
       b.querySelector('#pg-no').addEventListener('click', closeSheet);
       b.querySelector('#pg-yes').addEventListener('click', function () {
-        S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null;
+        S.prof.prog = k; delete S.prof.np; S.prof.wk = 1; S.prof.day = 0; Store.set('pr', S.prof); setProg(k); pickWeek = null; remSync();
         haptic('ok'); closeSheet(); show('train'); toast('Программа: ' + PROGS[k].t);
       });
     });
@@ -1062,6 +1134,7 @@
       [['Белки', T.p], ['Жиры', T.f], ['Углеводы', T.c]].map(function (m) { return '<div class="macro"><div class="n">' + m[1] + '<small> г</small></div><div class="t">' + m[0] + '</div></div>'; }).join('') + '</div>';
     profForm($('p-form'), pr);
     $('p-coach').setAttribute('aria-pressed', String(coachOn()));
+    $('p-rem').setAttribute('aria-pressed', String(!!S.prof.rem));
     $('p-store').textContent = cloud ? 'Данные хранятся в твоём аккаунте Telegram и доступны на всех твоих устройствах.' : 'Сейчас данные хранятся только в этом браузере. Открой приложение через Telegram, чтобы они сохранялись в аккаунте.';
   }
   $('p-save').addEventListener('click', function () {
@@ -1072,6 +1145,7 @@
     S.prof.coach = !coachOn(); Store.set('pr', S.prof); haptic(); $('p-coach').setAttribute('aria-pressed', String(coachOn()));
     toast(coachOn() ? 'Тренер снова с тобой' : 'Тренер отключён');
   });
+  $('p-rem').addEventListener('click', function () { haptic(); remSet(!S.prof.rem); });
   $('p-chan').addEventListener('click', function (e) { if (inTg && tg.openTelegramLink) { e.preventDefault(); tg.openTelegramLink('https://t.me/grindpash'); } });
 
   /* ---------------- onboarding ---------------- */
@@ -1089,7 +1163,7 @@
       S.prof = parseJ(o.pr, null); S.custom = parseJ(o.cp, []); S.recent = parseJ(o.fr, []); S.draft = parseJ(o.wd, null); S.rest = parseJ(o.rs, {}); S.swap = parseJ(o.sw, {}); if (S.prof) { setProg(progKey()); if (S.prof.wk > WK) { S.prof.wk = 1; S.prof.day = 0; } }
       S.logs = wk.map(function (k) { return parseJ(o[k], null); }).filter(Boolean).sort(function (a, b) { return b.ts - a.ts; });
       if (!S.prof) { profForm($('onb-form'), null); show('onb'); }
-      else show(S.draft ? 'train' : 'home');
+      else { show(S.draft ? 'train' : 'home'); coachPopOnce(); remSync(); }
     });
   });
 })();

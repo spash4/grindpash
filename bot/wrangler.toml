@@ -13,3 +13,7 @@ enabled = true
 [[kv_namespaces]]
 binding = "BC"
 id = "3bbaa308450d4d78a5daa63110f6549e"
+
+# Напоминания тренера: раз в час, по времени каждого человека шлём в 9:00 и 20:00
+[triggers]
+crons = ["0 * * * *"]
